@@ -169,6 +169,12 @@ app.use((err, req, res, next) => {
 const PORT = parseInt(process.env.PORT) || 5000;
 
 async function start() {
+  
+  server.listen(PORT, () => {
+    logger.info(`🚀 Aaple Shasan API running — port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
+    logger.info(`📡 WebSocket server ready`);
+  });
+
   // Verify DB
   try {
     await pool.query('SELECT 1');
@@ -204,10 +210,6 @@ async function start() {
     startCronJobs();
   }
 
-  server.listen(PORT, () => {
-    logger.info(`🚀 Aaple Shasan API running — port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
-    logger.info(`📡 WebSocket server ready`);
-  });
 }
 
 // ── Graceful Shutdown ────────────────────────────────────────────────────────────
