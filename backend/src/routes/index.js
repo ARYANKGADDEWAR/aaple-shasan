@@ -60,6 +60,8 @@ auth.post('/login/password',
   validate({ body: authSchemas.login }),
   authController.loginWithPassword
 );
+auth.post('/firebase-login', authRateLimiter, authController.firebaseLogin);
+auth.post('/firebase-register', authRateLimiter, authController.firebaseRegister);
 auth.post('/refresh', authController.refreshAccessToken);
 auth.post('/logout', authenticate, authController.logout);
 auth.get('/me', authenticate, authController.getMe);

@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const { query, transaction } = require('../config/database');
 const { cache } = require('../config/redis');
 const logger = require('../config/logger');
+const firebaseAdmin = require('../config/firebaseAdmin');
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -19,6 +20,34 @@ function hashOTP(otp) {
 
 function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+
+function normalizeFirebasePhone(phoneNumber) {
+  if (!phoneNumber) return null;
+  const digits = String(phoneNumber).replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
+  if (digits.length === 10) return digits;
+  return null;
+}
+
+async function verifyFirebaseIdToken(token) {
+  if (!firebaseAdmin.apps.length) {
+    const err = new Error('Firebase Admin is not configured on backend.');
+    err.statusCode = 500;
+    throw err;
+  }
+
+  const decoded = await firebaseAdmin.auth().verifyIdToken(token);
+  const phone = normalizeFirebasePhone(decoded.phone_number);
+
+  if (!phone) {
+    const err = new Error('Firebase token does not contain a valid Indian phone number.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  return { decoded, phone };
 }
 
 function generateAccessToken(userId, role, jti) {
@@ -315,6 +344,79 @@ async function issueTokens(user, req, res, method) {
   });
 }
 
+async function firebaseLogin(req, res) {
+  try {
+    const { token } = req.body;
+    if (!token) {
+      return res.status(400).json({ success: false, message: 'Firebase token required.' });
+    }
+
+    const { phone } = await verifyFirebaseIdToken(token);
+    const userResult = await query(
+      `SELECT id, full_name, email, phone, role, dept, is_active, is_locked, aadhaar_verified, civic_royalty_balance, phone_verified
+       FROM users WHERE phone = $1 AND deleted_at IS NULL`,
+      [phone]
+    );
+
+    if (!userResult.rows.length) {
+      return res.status(404).json({ success: false, message: 'Phone number not registered. Please create an account first.', code: 'PHONE_NOT_REGISTERED' });
+    }
+
+    const user = userResult.rows[0];
+    if (user.is_locked || !user.is_active) {
+      return res.status(403).json({ success: false, message: 'Account locked or inactive. Contact support.' });
+    }
+
+    await query('UPDATE users SET phone_verified = TRUE, failed_login_attempts = 0, last_login_at = NOW(), last_login_ip = $1 WHERE id = $2', [req.ip, user.id]);
+    user.phone_verified = true;
+    return await issueTokens(user, req, res, 'Firebase phone login');
+  } catch (err) {
+    logger.error('Firebase login error', { error: err.message });
+    return res.status(err.statusCode || 401).json({ success: false, message: err.message || 'Firebase login failed.' });
+  }
+}
+
+async function firebaseRegister(req, res) {
+  try {
+    const { token, phone, full_name, email, password, ward_constituency, district } = req.body;
+
+    if (!token) return res.status(400).json({ success: false, message: 'Firebase token required.' });
+    if (!full_name || full_name.trim().length < 2) return res.status(400).json({ success: false, message: 'Full name required.' });
+    if (!password || password.length < 8) return res.status(400).json({ success: false, message: 'Password must be at least 8 characters.' });
+
+    const verified = await verifyFirebaseIdToken(token);
+    if (phone && verified.phone !== phone) {
+      return res.status(400).json({ success: false, message: 'Verified phone does not match submitted phone.' });
+    }
+
+    const existing = await query('SELECT id FROM users WHERE phone = $1 AND deleted_at IS NULL', [verified.phone]);
+    if (existing.rows.length) {
+      return res.status(409).json({ success: false, message: 'Phone number already registered. Please log in.', code: 'PHONE_EXISTS' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const newUser = await transaction(async (client) => {
+      const result = await client.query(
+        `INSERT INTO users (full_name, email, phone, phone_verified, password_hash, ward_constituency, district, role)
+         VALUES ($1, $2, $3, TRUE, $4, $5, $6, 'citizen')
+         RETURNING id, full_name, email, phone, role`,
+        [full_name.trim(), email?.trim() || null, verified.phone, passwordHash, ward_constituency || null, district || null]
+      );
+      return result.rows[0];
+    });
+
+    logger.info('New user registered with Firebase phone auth', { userId: newUser.id, phone: verified.phone });
+    res.status(201).json({
+      success: true,
+      message: 'Registration successful! Welcome to Aaple Shasan.',
+      user: { id: newUser.id, full_name: newUser.full_name, phone: newUser.phone, role: newUser.role },
+    });
+  } catch (err) {
+    logger.error('Firebase register error', { error: err.message });
+    return res.status(err.statusCode || 401).json({ success: false, message: err.message || 'Firebase registration failed.' });
+  }
+}
+
 // ── Refresh Token ────────────────────────────────────────────────────────────
 
 async function refreshAccessToken(req, res) {
@@ -451,6 +553,8 @@ module.exports = {
   verifyRegistrationOTP,
   requestLoginOTP,
   verifyLoginOTP,
+  firebaseLogin,
+  firebaseRegister,
   loginWithPassword,
   refreshAccessToken,
   logout,

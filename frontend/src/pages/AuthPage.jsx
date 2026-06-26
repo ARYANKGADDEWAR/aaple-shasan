@@ -5,7 +5,23 @@ import { motion, AnimatePresence } from 'framer-motion';
 import toast from 'react-hot-toast';
 import { Shield, Phone, Lock, ArrowRight, CheckCircle, Eye, EyeOff, ChevronLeft, User, MapPin } from 'lucide-react';
 import { authAPI } from '../utils/api';
+import { signInWithPhoneNumber, RecaptchaVerifier } from 'firebase/auth';
+import { firebaseAuth } from '../config/firebase';
 import { useAuthStore } from '../store/authStore';
+
+
+// ── Firebase Phone Auth helper ──────────────────────────────────────────
+function getRecaptchaVerifier() {
+  if (window.recaptchaVerifier) return window.recaptchaVerifier;
+
+  window.recaptchaVerifier = new RecaptchaVerifier(
+    firebaseAuth,
+    'recaptcha-container',
+    { size: 'invisible' }
+  );
+
+  return window.recaptchaVerifier;
+}
 
 // ── OTP Input ──────────────────────────────────────────────────────────
 function OTPInput({ value, onChange }) {
@@ -87,26 +103,32 @@ export function LoginPage() {
     if (!/^\d{10}$/.test(phone)) return toast.error('Enter a valid 10-digit mobile number.');
     setLoading(true);
     try {
-      await authAPI.requestLoginOTP({ phone });
+      const appVerifier = getRecaptchaVerifier();
+      window.loginConfirmationResult = await signInWithPhoneNumber(firebaseAuth, `+91${phone}`, appVerifier);
       toast.success('OTP sent to your mobile!');
       setMode('otp');
       setTimer(60);
     } catch (e) {
-      toast.error(e.response?.data?.message || 'Failed to send OTP');
+      console.error('Firebase login OTP error:', e);
+      toast.error(e.message || 'Failed to send OTP');
     } finally { setLoading(false); }
   };
 
   const verifyOTP = async () => {
     if (otp.length !== 6) return toast.error('Enter all 6 digits of the OTP.');
+    if (!window.loginConfirmationResult) return toast.error('Please request OTP again.');
     setLoading(true);
     try {
-      const res = await authAPI.verifyLoginOTP({ phone, otp });
+      const firebaseResult = await window.loginConfirmationResult.confirm(otp);
+      const firebaseToken = await firebaseResult.user.getIdToken();
+      const res = await authAPI.firebaseLogin({ token: firebaseToken });
       const { accessToken, user } = res.data.data;
       login(accessToken, user);
       toast.success(`Welcome back, ${user.full_name.split(' ')[0]}! 🙏`);
       navigate(user.role === 'citizen' ? '/citizen' : '/admin');
     } catch (e) {
-      toast.error(e.response?.data?.message || 'Invalid OTP');
+      console.error('Firebase login verify error:', e);
+      toast.error(e.response?.data?.message || e.message || 'Invalid OTP');
       setOtp('');
     } finally { setLoading(false); }
   };
@@ -127,6 +149,7 @@ export function LoginPage() {
 
   return (
     <div className="min-h-screen flex bg-hero-gradient">
+      <div id="recaptcha-container" />
       {/* Left branding panel */}
       <div className="hidden lg:flex w-1/2 flex-col justify-between p-12 text-white">
         <div>
@@ -298,23 +321,31 @@ export function RegisterPage() {
     if (!/^\d{10}$/.test(form.phone)) return toast.error('Valid 10-digit mobile required.');
     setLoading(true);
     try {
-      await authAPI.requestRegisterOTP({ phone: form.phone, full_name: form.full_name, email: form.email });
+      const appVerifier = getRecaptchaVerifier();
+      window.registerConfirmationResult = await signInWithPhoneNumber(firebaseAuth, `+91${form.phone}`, appVerifier);
       toast.success('OTP sent!');
       setStep(2);
       setTimer(60);
     } catch (e) {
-      toast.error(e.response?.data?.message || 'Failed to send OTP');
+      console.error('Firebase register OTP error:', e);
+      toast.error(e.message || 'Failed to send OTP');
     } finally { setLoading(false); }
   };
 
   const verifyAndRegister = async () => {
     if (otp.length !== 6) return toast.error('Enter all 6 OTP digits.');
+    if (!window.registerConfirmationResult) return toast.error('Please request OTP again.');
     if (!form.password || form.password.length < 8) return toast.error('Password must be at least 8 characters.');
     if (form.password !== form.confirm_password) return toast.error('Passwords do not match.');
     setLoading(true);
     try {
-      await authAPI.verifyRegisterOTP({
-        phone: form.phone, otp,
+      const firebaseResult = await window.registerConfirmationResult.confirm(otp);
+      const firebaseToken = await firebaseResult.user.getIdToken();
+      await authAPI.firebaseRegister({
+        token: firebaseToken,
+        phone: form.phone,
+        full_name: form.full_name,
+        email: form.email,
         password: form.password,
         ward_constituency: form.ward_constituency,
         district: form.district,
@@ -322,12 +353,14 @@ export function RegisterPage() {
       toast.success('Account created! Please log in.');
       navigate('/login');
     } catch (e) {
-      toast.error(e.response?.data?.message || 'Registration failed');
+      console.error('Firebase register verify error:', e);
+      toast.error(e.response?.data?.message || e.message || 'Registration failed');
     } finally { setLoading(false); }
   };
 
   return (
     <div className="min-h-screen bg-hero-gradient flex items-center justify-center p-6">
+      <div id="recaptcha-container" />
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="w-full max-w-md">
         <div className="flex items-center gap-2 mb-6 text-white">
           <span className="text-2xl">🏛️</span>
