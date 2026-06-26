@@ -3,6 +3,7 @@ const logger = require('./logger');
 
 const redis = {
   on: () => {},
+  ping: async () => 'PONG',
   get: async () => null,
   set: async () => null,
   del: async () => null,
