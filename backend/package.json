@@ -1,6 +1,7 @@
 {
   "name": "aaple-shasan-backend",
   "version": "1.0.0",
+  "engines": {"node": "20.x"},
   "description": "Aaple Shasan Government of Maharashtra AI Civic Platform API",
   "main": "src/server.js",
   "scripts": {
