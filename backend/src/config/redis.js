@@ -2,10 +2,16 @@
 const Redis = require('ioredis');
 const logger = require('./logger');
 
-const redis = new Redis({
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT) || 6379,
-  password: process.env.REDIS_PASSWORD,
+const redisOptions = process.env.REDIS_URL
+  ? process.env.REDIS_URL
+  : {
+      host: process.env.REDIS_HOST || 'localhost',
+      port: parseInt(process.env.REDIS_PORT) || 6379,
+      password: process.env.REDIS_PASSWORD,
+      tls: process.env.REDIS_HOST?.includes('upstash.io') ? {} : undefined,
+    };
+
+const redis = new Redis(redisOptions, {
   retryStrategy: (times) => {
     const delay = Math.min(times * 50, 2000);
     logger.warn(`Redis reconnecting... attempt ${times}`);
