@@ -2,16 +2,20 @@
 const Redis = require('ioredis');
 const logger = require('./logger');
 
-const redisOptions = process.env.REDIS_URL
-  ? process.env.REDIS_URL
-  : {
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT) || 6379,
-      password: process.env.REDIS_PASSWORD,
-      tls: process.env.REDIS_HOST?.includes('upstash.io') ? {} : undefined,
-    };
+let redisConfig;
 
-const redis = new Redis(redisOptions, {
+if (process.env.REDIS_URL) {
+  redisConfig = process.env.REDIS_URL; // rediss://default:password@host:6379
+} else {
+  redisConfig = {
+    host: process.env.REDIS_HOST || 'localhost',
+    port: parseInt(process.env.REDIS_PORT) || 6379,
+    password: process.env.REDIS_PASSWORD,
+    tls: process.env.REDIS_HOST?.includes('upstash.io') ? {} : undefined,
+  };
+}
+
+const redis = new Redis(redisConfig, {
   retryStrategy: (times) => {
     const delay = Math.min(times * 50, 2000);
     logger.warn(`Redis reconnecting... attempt ${times}`);
@@ -20,7 +24,7 @@ const redis = new Redis(redisOptions, {
   maxRetriesPerRequest: 3,
   lazyConnect: false,
   enableReadyCheck: true,
-  keyPrefix: 'as:', // aaple-shasan prefix
+  keyPrefix: 'as:',
 });
 
 redis.on('connect', () => logger.info('Redis connected'));
@@ -28,7 +32,6 @@ redis.on('ready', () => logger.info('Redis ready'));
 redis.on('error', (err) => logger.error('Redis error', { error: err.message }));
 redis.on('close', () => logger.warn('Redis connection closed'));
 
-// Helper wrappers
 const cache = {
   async get(key) {
     const val = await redis.get(key);
