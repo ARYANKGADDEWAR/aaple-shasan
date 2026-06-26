@@ -21,9 +21,9 @@ const redis = new Redis(redisConfig, {
     logger.warn(`Redis reconnecting... attempt ${times}`);
     return delay;
   },
-  maxRetriesPerRequest: 3,
+  maxRetriesPerRequest: null,
   lazyConnect: false,
-  enableReadyCheck: true,
+  enableReadyCheck: false,
   keyPrefix: 'as:',
 });
 
