@@ -9,7 +9,6 @@ import {
 import { useSocket } from '../../hooks/useSocket.jsx';
 import { useAuthStore } from '../../store/authStore';
 import { notificationsAPI } from '../../utils/api';
-import { useSocket } from '../../hooks/useSocket';
 import toast from 'react-hot-toast';
 import { formatDistanceToNow } from 'date-fns';
 
